@@ -258,6 +258,43 @@ func tools() []ToolDefinition {
 				Required: []string{"sessionId"},
 			},
 		},
+		{
+			Name:        "vulpine_press_key",
+			Description: "Press a keyboard key or shortcut. Supports: Enter, Tab, Escape, Backspace, Delete, ArrowUp/Down/Left/Right, Home, End, PageUp/Down, Space. Modifiers: ctrl, shift, alt, meta (e.g. \"ctrl+shift\").",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"sessionId": {Type: "string", Description: "Target page session ID"},
+					"key":       {Type: "string", Description: "Key name (Enter, Tab, Escape, Backspace, ArrowDown, etc.)"},
+					"modifiers": {Type: "string", Description: "Optional modifiers: ctrl, shift, alt, meta, or combinations like ctrl+shift"},
+				},
+				Required: []string{"sessionId", "key"},
+			},
+		},
+		{
+			Name:        "vulpine_clear_input",
+			Description: "Clear the text in an input field. Optionally specify a CSS selector to focus the element first, then selects all text and deletes it.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"sessionId": {Type: "string", Description: "Target page session ID"},
+					"selector":  {Type: "string", Description: "Optional CSS selector to focus before clearing"},
+				},
+				Required: []string{"sessionId"},
+			},
+		},
+		{
+			Name:        "vulpine_get_form_errors",
+			Description: "Extract form validation error messages from the page. Checks HTML5 validation, common error CSS classes (.error, .is-invalid, [aria-invalid]), and aria-describedby messages.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"sessionId": {Type: "string", Description: "Target page session ID"},
+					"selector":  {Type: "string", Description: "CSS selector for the form (default: \"form\")"},
+				},
+				Required: []string{"sessionId"},
+			},
+		},
 	}
 }
 
@@ -320,6 +357,12 @@ func handleToolCallFull(client *juggler.Client, tracker *ContextTracker, screens
 		return handleFillForm(client, args)
 	case "vulpine_page_info":
 		return handleGetPageInfo(client, args)
+	case "vulpine_press_key":
+		return handlePressKey(client, args)
+	case "vulpine_clear_input":
+		return handleClearInput(client, args)
+	case "vulpine_get_form_errors":
+		return handleGetFormErrors(client, args)
 
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)

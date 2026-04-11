@@ -609,6 +609,155 @@ func handleGetPageInfo(client *juggler.Client, args json.RawMessage) (*ToolCallR
 	return textResult(result), nil
 }
 
+// handlePressKey dispatches keyboard events for special keys with optional modifiers.
+func handlePressKey(client *juggler.Client, args json.RawMessage) (*ToolCallResult, error) {
+	var p struct {
+		SessionID string `json:"sessionId"`
+		Key       string `json:"key"`       // "Enter", "Tab", "Escape", "Backspace", "ArrowDown", etc.
+		Modifiers string `json:"modifiers"` // "ctrl", "shift", "alt", "ctrl+shift", etc.
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return errorResult(err), nil
+	}
+
+	// Map key names to key codes
+	keyMap := map[string]string{
+		"Enter": "Enter", "Tab": "Tab", "Escape": "Escape",
+		"Backspace": "Backspace", "Delete": "Delete",
+		"ArrowUp": "ArrowUp", "ArrowDown": "ArrowDown",
+		"ArrowLeft": "ArrowLeft", "ArrowRight": "ArrowRight",
+		"Home": "Home", "End": "End",
+		"PageUp": "PageUp", "PageDown": "PageDown",
+		"Space": " ",
+	}
+
+	key := p.Key
+	if mapped, ok := keyMap[p.Key]; ok {
+		key = mapped
+	}
+
+	// Parse modifiers
+	modifiers := 0
+	if strings.Contains(p.Modifiers, "alt") {
+		modifiers |= 1
+	}
+	if strings.Contains(p.Modifiers, "ctrl") {
+		modifiers |= 2
+	}
+	if strings.Contains(p.Modifiers, "meta") {
+		modifiers |= 4
+	}
+	if strings.Contains(p.Modifiers, "shift") {
+		modifiers |= 8
+	}
+
+	// keydown
+	_, err := client.Call(p.SessionID, "Page.dispatchKeyEvent", map[string]interface{}{
+		"type": "keydown", "key": key, "modifiers": modifiers,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	// keyup
+	_, err = client.Call(p.SessionID, "Page.dispatchKeyEvent", map[string]interface{}{
+		"type": "keyup", "key": key, "modifiers": modifiers,
+	})
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	desc := key
+	if p.Modifiers != "" {
+		desc = p.Modifiers + "+" + key
+	}
+	return textResult(fmt.Sprintf("Pressed %s", desc)), nil
+}
+
+// handleClearInput selects all text in the focused input and deletes it.
+func handleClearInput(client *juggler.Client, args json.RawMessage) (*ToolCallResult, error) {
+	var p struct {
+		SessionID string `json:"sessionId"`
+		Selector  string `json:"selector"` // optional CSS selector to focus first
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return errorResult(err), nil
+	}
+
+	if p.Selector != "" {
+		js := fmt.Sprintf(`(() => { const el = document.querySelector(%q); if(el){el.focus();el.select();} return !!el; })()`, p.Selector)
+		evalJS(client, p.SessionID, js)
+	}
+
+	// Select all (ctrl+a)
+	client.Call(p.SessionID, "Page.dispatchKeyEvent", map[string]interface{}{
+		"type": "keydown", "key": "a", "modifiers": 2,
+	})
+	client.Call(p.SessionID, "Page.dispatchKeyEvent", map[string]interface{}{
+		"type": "keyup", "key": "a", "modifiers": 2,
+	})
+	// Delete selected text
+	client.Call(p.SessionID, "Page.dispatchKeyEvent", map[string]interface{}{
+		"type": "keydown", "key": "Backspace", "modifiers": 0,
+	})
+	client.Call(p.SessionID, "Page.dispatchKeyEvent", map[string]interface{}{
+		"type": "keyup", "key": "Backspace", "modifiers": 0,
+	})
+
+	return textResult("Input cleared"), nil
+}
+
+// handleGetFormErrors extracts form validation error messages from the page.
+func handleGetFormErrors(client *juggler.Client, args json.RawMessage) (*ToolCallResult, error) {
+	var p struct {
+		SessionID string `json:"sessionId"`
+		Selector  string `json:"selector"` // optional form selector, default "form"
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return errorResult(err), nil
+	}
+
+	sel := "form"
+	if p.Selector != "" {
+		sel = p.Selector
+	}
+
+	js := fmt.Sprintf(`(() => {
+		const form = document.querySelector(%q);
+		if (!form) return JSON.stringify({error: "form not found"});
+		const errors = [];
+		// Check HTML5 validation
+		const inputs = form.querySelectorAll('input, select, textarea');
+		for (const input of inputs) {
+			if (!input.checkValidity()) {
+				errors.push({field: input.name || input.id, message: input.validationMessage, type: "html5"});
+			}
+		}
+		// Check common error class patterns
+		const errorEls = form.querySelectorAll('.error, .invalid, .is-invalid, [aria-invalid="true"], .field-error, .form-error, .validation-error');
+		for (const el of errorEls) {
+			const text = el.textContent.trim();
+			if (text) errors.push({field: "", message: text, type: "css"});
+		}
+		// Check aria-describedby error messages
+		const described = form.querySelectorAll('[aria-describedby]');
+		for (const el of described) {
+			const descId = el.getAttribute('aria-describedby');
+			const desc = document.getElementById(descId);
+			if (desc && desc.textContent.trim()) {
+				errors.push({field: el.name || el.id, message: desc.textContent.trim(), type: "aria"});
+			}
+		}
+		return JSON.stringify({errors: errors, count: errors.length});
+	})()`, sel)
+
+	result, err := evalJS(client, p.SessionID, js)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	return textResult(result), nil
+}
+
 // --- Helper functions ---
 
 // evalJS evaluates JavaScript and returns the string result.
