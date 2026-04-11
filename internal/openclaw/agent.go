@@ -73,6 +73,9 @@ type Agent struct {
 	status         AgentStatus
 	startedAt      time.Time
 	env            map[string]string // extra environment variables for the subprocess
+	RestartCount   int               // number of automatic restarts after crashes
+	binary         string            // binary path used to start this agent
+	args           []string          // args used to start this agent
 }
 
 // newAgent creates a new agent instance (not yet started).
@@ -96,6 +99,9 @@ func (a *Agent) start(binary string, args []string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	a.binary = binary
+	a.args = make([]string, len(args))
+	copy(a.args, args)
 	a.cmd = exec.Command(binary, args...)
 
 	// Apply extra environment variables (e.g. OPENCLAW_CONFIG_PATH)
@@ -390,6 +396,24 @@ func (a *Agent) Stop() error {
 // Wait blocks until the agent exits.
 func (a *Agent) Wait() {
 	<-a.doneCh
+}
+
+// ExitCode returns the process exit code, or -1 if still running or not started.
+func (a *Agent) ExitCode() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cmd == nil || a.cmd.ProcessState == nil {
+		return -1
+	}
+	return a.cmd.ProcessState.ExitCode()
+}
+
+// restart re-launches the agent subprocess using the same binary and args.
+func (a *Agent) restart() error {
+	// Reset channels for the new process
+	a.conversationCh = make(chan ConversationMsg, 64)
+	a.doneCh = make(chan struct{})
+	return a.start(a.binary, a.args)
 }
 
 // Status returns the current agent status.

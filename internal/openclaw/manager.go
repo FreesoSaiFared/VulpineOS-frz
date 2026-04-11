@@ -294,9 +294,26 @@ func (m *Manager) Spawn(contextID string, sopFile string, extraArgs ...string) (
 	m.agents[id] = agent
 	m.mu.Unlock()
 
-	// Auto-cleanup when agent exits
+	// Auto-restart on crash (up to 3 attempts), then cleanup
 	go func() {
-		agent.Wait()
+		for {
+			agent.Wait()
+			exitCode := agent.ExitCode()
+
+			// Only restart on non-zero exit (crash), not clean completion
+			if exitCode != 0 && agent.RestartCount < 3 {
+				agent.RestartCount++
+				fmt.Printf("agent %s crashed (exit %d), restarting (attempt %d/3)\n", id, exitCode, agent.RestartCount)
+				time.Sleep(time.Duration(agent.RestartCount) * time.Second) // backoff
+				if err := agent.restart(); err != nil {
+					fmt.Printf("agent %s restart failed: %v\n", id, err)
+					break
+				}
+				go m.forwardConversation(agent)
+				continue
+			}
+			break
+		}
 		m.mu.Lock()
 		delete(m.agents, id)
 		m.mu.Unlock()
