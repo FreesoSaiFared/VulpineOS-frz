@@ -1077,6 +1077,24 @@ const Page = {
         modifiers: t.Number,
       }
     },
+    'dispatchDragEvent': {
+      params: {
+        type: t.Enum(['dragover', 'drop', 'dragend']),
+        x: t.Number,
+        y: t.Number,
+        modifiers: t.Number,
+      }
+    },
+    'getShadowDOM': {
+      params: {
+        frameId: t.String,
+        objectId: t.String,
+        maxDepth: t.Optional(t.Number),
+      },
+      returns: {
+        nodes: t.Any,
+      },
+    },
     'insertText': {
       params: {
         text: t.String,
