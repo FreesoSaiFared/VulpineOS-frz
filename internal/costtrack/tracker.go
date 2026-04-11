@@ -189,6 +189,41 @@ func (t *Tracker) TotalCost() float64 {
 	return total
 }
 
+// GetBudget returns the budget for an agent, or nil if none is set.
+func (t *Tracker) GetBudget(agentID string) *Budget {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if b, ok := t.budgets[agentID]; ok {
+		cp := *b
+		return &cp
+	}
+	return nil
+}
+
+// ShouldStop checks whether an agent has exceeded its budget and should be stopped.
+// Returns true and a reason string if the agent should stop, false otherwise.
+func (t *Tracker) ShouldStop(agentID string) (bool, string) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	usage, uOk := t.usage[agentID]
+	if !uOk {
+		return false, ""
+	}
+	budget, bOk := t.budgets[agentID]
+	if !bOk {
+		return false, ""
+	}
+
+	if budget.MaxCostUSD > 0 && usage.EstimatedCost >= budget.MaxCostUSD {
+		return true, fmt.Sprintf("budget exceeded: $%.4f >= $%.4f", usage.EstimatedCost, budget.MaxCostUSD)
+	}
+	if budget.MaxTokens > 0 && usage.TotalTokens >= budget.MaxTokens {
+		return true, fmt.Sprintf("token limit exceeded: %d >= %d", usage.TotalTokens, budget.MaxTokens)
+	}
+	return false, ""
+}
+
 // MarshalJSON exports all tracking data.
 func (t *Tracker) MarshalJSON() ([]byte, error) {
 	t.mu.RLock()
