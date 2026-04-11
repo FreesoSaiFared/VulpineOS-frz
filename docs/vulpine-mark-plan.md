@@ -136,3 +136,53 @@ New tool `vulpine_annotated_screenshot`:
 - Accuracy improvement on WebArena-style benchmarks (target: 20%+ vs non-annotated)
 - Latency: <100ms for standalone, <20ms for native Juggler
 - GitHub stars / adoption by other agent frameworks
+
+## Future Ideas (overnight ideation)
+
+These are NEW ideas beyond the MVP and current roadmap, ranked by impact-to-effort ratio. The top items are the ones most worth building next.
+
+### 1. Semantic Focus Modes (`--focus=forms|nav|content|cta`)
+**What:** Let the agent request a scoped annotation pass ("only form fields", "only primary CTAs", "only nav links") so dense pages aren't swamped with 80+ badges.
+**Effort:** ~4 hours. It's a filter stage on top of `enumerate.go` — role whitelist + heuristics (CTA = button with prominent bg color + above-fold).
+**Why it matters:** On real sites (checkout flows, dashboards) raw SoM produces unreadable label soup and tanks accuracy *worse* than no labels. Focus modes are the single biggest usability lever for agents and cost almost nothing to add.
+**Where:** Public repo (library API + CLI flag). Native version inherits it free.
+
+### 2. Overlap-Aware Label Fanout with Leader Lines
+**What:** Detect when badges would overlap (simple rect collision on the label rects, not the element rects), then push colliding labels outward and draw a thin leader line from the badge back to the element.
+**Effort:** ~6 hours. Greedy repulsion pass over label positions + `image/draw` line primitive. No layout engine needed.
+**Why it matters:** Current top-left placement is unreadable on dense UIs (toolbars, data grids, menu bars). This is the #1 visual complaint from every SoM implementation in the wild and is trivially solvable without ML.
+**Where:** Public repo. Pure rendering concern.
+
+### 3. Diff Mode (`Annotate(before, after)`)
+**What:** Take two annotated snapshots and label *only* elements that appeared, moved, or changed state between them. Returns a third image highlighting deltas in a distinct color.
+**Effort:** ~5 hours. Element map already has stable keys (tag+role+text+rect hash); diff is a set-compare + re-render.
+**Why it matters:** Agents constantly re-annotate after every click just to find "what's new" (a modal, a dropdown, an error message). Diff mode turns an O(page) problem into O(change) — dramatically fewer tokens sent to the LLM, and huge reliability win for modal detection.
+**Where:** Public repo. Builds directly on existing element map.
+
+### 4. Cluster Mode for Repeated Items (`@5[0..n]`)
+**What:** Detect visually/structurally repeated children (list rows, card grids, search results) and collapse them under a single cluster label. Agent addresses children as `@5[3]` instead of getting 40 separate badges.
+**Effort:** ~10 hours. Sibling similarity heuristic (same tag path + same bounding-rect shape within parent) + indexed label schema + click-by-index helper.
+**Why it matters:** Kills the "100 labels on a product grid" problem. Agents can reason about "the 3rd result" semantically and the label map shrinks ~10x on list-heavy pages. This is the single feature that would make vulpine-mark obviously better than every competitor on e-commerce/search tasks.
+**Where:** Public repo. Pure DOM-side logic.
+
+### 5. SVG Overlay Output (`--format=svg`)
+**What:** Emit an SVG overlay (not a raster PNG) that can be composited over the raw screenshot client-side. Agent/UI can toggle the overlay, zoom losslessly, or extract just the underlying screenshot on demand.
+**Effort:** ~4 hours. Replace `image/draw` calls with an SVG writer; keep the raster path as the default.
+**Why it matters:** Solves two pain points at once: (a) VLMs sometimes reason better on the *unannotated* image then consult the overlay separately, (b) UI tools (debug viewer, web panel replay) want a toggleable layer. Also dramatically smaller payload than PNG for sparse pages.
+**Where:** Public repo. Trivially portable.
+
+---
+
+### Also-ran ideas (not written above, logged for later)
+
+6. **Heatmap mode** — replace labels with a color gradient showing element "importance" (size × above-fold × role) for quick visual triage. ~6h. Public.
+7. **Palette packs** — high-contrast / colorblind-safe / monochrome / dark-mode palette profiles selectable via `--palette`. ~2h. Public.
+8. **Record-and-replay sequences** — capture annotated screenshots + element maps on every agent action, persist as a timeline for post-hoc debugging. ~8h. **VulpineOS-native** (ties into `internal/recording/`).
+9. **Occlusion-aware labeling** — run `elementFromPoint` at each candidate's center and drop elements hidden behind modals/overlays. Already on roadmap but worth flagging as a correctness (not ideation) priority. ~3h. Public.
+10. **Scroll-stitched full-page mode with virtualized-list guard** — detect virtualized scrollers (React Virtual, Ag-Grid) and bail out instead of infinite-scrolling. ~8h. Public.
+11. **Cross-origin iframe labeling via compositor** — the native-Juggler killer feature: label elements inside cross-origin iframes by reading their layout tree from the parent process. ~16h. **VulpineOS-native only** (impossible in CDP standalone).
+12. **Label-stability across re-renders** — hash each element's semantic identity (role+text+ancestor chain) so `@5` refers to the same button on re-annotate, even if DOM order changed. ~6h. Public. Huge for multi-step flows.
+13. **Arrow mode** — draw arrows from each element to a list of labels anchored at the screen edge, keeping the page content unobscured. ~5h. Public.
+14. **Pre-warmed annotation cache** — on navigation, pre-compute annotation in the background so the first `Annotate()` call after page-load is instant. ~4h. **VulpineOS-native** (needs lifecycle hooks).
+15. **Confidence scores per label** — expose a confidence field in the element map (`0.0-1.0`) based on visibility %, occlusion, and role certainty; lets the agent ignore low-confidence badges. ~3h. Public.
+
